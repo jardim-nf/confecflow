@@ -1,18 +1,40 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { initialData } from '../data';
-import { MoreHorizontal, Calendar, Clock, User, Scissors, Shirt, Package, CheckCircle2 } from 'lucide-react';
-// 1. Importando o Modal
+import { Clock, User, Scissors, Shirt, Package, CheckCircle2, Hash } from 'lucide-react';
 import NewOrderModal from '../components/NewOrderModal';
+import LossModal from '../components/LossModal';
 
 const KanbanBoard = () => {
   const [data, setData] = useState(initialData);
-  // 2. Estado para controlar se o modal está aberto ou fechado
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isLossModalOpen, setIsLossModalOpen] = useState(false);
+  const [pendingMove, setPendingMove] = useState(null);
+  const [currentTime, setCurrentTime] = useState(Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const getTempoDecorrido = (startTime) => {
+    if (!startTime) return "0m";
+    const diffMs = currentTime - startTime;
+    const diffMinutos = Math.max(0, Math.floor(diffMs / (1000 * 60))); // Garante que não fique negativo
+    
+    if (diffMinutos < 60) return `${diffMinutos}m`;
+    
+    const horas = Math.floor(diffMinutos / 60);
+    const minutos = diffMinutos % 60;
+    return `${horas}h ${minutos}m`;
+  };
 
   const onDragEnd = (result) => {
     const { destination, source, draggableId } = result;
     if (!destination) return;
+    
     if (destination.droppableId === source.droppableId && destination.index === source.index) return;
 
     const start = data.columns[source.droppableId];
@@ -27,20 +49,55 @@ const KanbanBoard = () => {
       return;
     }
 
+    setPendingMove(result);
+    setIsLossModalOpen(true);
+  };
+
+  const handleConfirmMove = (qtdPerda) => {
+    if (!pendingMove) return;
+
+    const { destination, source, draggableId } = pendingMove;
+    const start = data.columns[source.droppableId];
+    const finish = data.columns[destination.droppableId];
+
     const startTaskIds = Array.from(start.taskIds);
     startTaskIds.splice(source.index, 1);
     const newStart = { ...start, taskIds: startTaskIds };
+
     const finishTaskIds = Array.from(finish.taskIds);
     finishTaskIds.splice(destination.index, 0, draggableId);
     const newFinish = { ...finish, taskIds: finishTaskIds };
 
+    const task = data.tasks[draggableId];
+    if (!task) return; // Trava de segurança
+
+    const qtdAtual = task.qtdAtual !== undefined ? task.qtdAtual : task.qtdInicial;
+    const novaQtdAtual = Math.max(0, qtdAtual - qtdPerda); // Garante que a quantidade não fique negativa
+
+    const updatedTask = {
+      ...task,
+      qtdAtual: novaQtdAtual,
+      perdas: {
+        ...task.perdas,
+        [start.id]: (task.perdas?.[start.id] || 0) + qtdPerda
+      }
+    };
+
     setData({
       ...data,
+      tasks: { ...data.tasks, [draggableId]: updatedTask },
       columns: { ...data.columns, [newStart.id]: newStart, [newFinish.id]: newFinish },
     });
+
+    setIsLossModalOpen(false);
+    setPendingMove(null);
   };
 
-  // Ícones e Cores por Coluna
+  const handleCancelMove = () => {
+    setIsLossModalOpen(false);
+    setPendingMove(null);
+  };
+
   const getColumnStyle = (colId) => {
     switch(colId) {
       case 'col-1': return { icon: Scissors, color: 'text-pink-500', bg: 'bg-pink-50', border: 'border-pink-200', bar: 'bg-pink-500' };
@@ -53,52 +110,72 @@ const KanbanBoard = () => {
 
   return (
     <div className="h-full flex flex-col">
-      {/* 3. Componente do Modal (Fica invisível até clicar no botão) */}
       <NewOrderModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)}
-        onSave={() => {
-            // Aqui futuramente vamos salvar no Firebase
-            console.log("Salvo!");
+        onSave={(novoPedido) => {
+            if (!novoPedido || !novoPedido.id) return; // Segurança caso o modal envie algo vazio
+
+            const novasTasks = {
+              ...data.tasks,
+              [novoPedido.id]: {
+                ...novoPedido,
+                qtdAtual: novoPedido.qtdInicial || 0,
+                priority: 'normal', 
+                client: 'Cliente Balcão',
+                createdAt: Date.now()
+              }
+            };
+
+            const colunaInicial = data.columns['col-1'];
+            // Segurança: Garante que taskIds existe e é um array
+            const taskIdsSeguros = colunaInicial?.taskIds || [];
+            const novosTaskIds = [...taskIdsSeguros, novoPedido.id];
+            
+            const novaColuna = { ...colunaInicial, taskIds: novosTaskIds };
+
+            setData({
+              ...data,
+              tasks: novasTasks,
+              columns: { ...data.columns, 'col-1': novaColuna }
+            });
         }}
       />
 
-      {/* Header da Página */}
+      {/* Trava de segurança no envio do taskName para evitar undefined */}
+      <LossModal 
+        isOpen={isLossModalOpen}
+        onClose={handleCancelMove}
+        onConfirm={handleConfirmMove}
+        taskName={pendingMove && data.tasks[pendingMove.draggableId] ? data.tasks[pendingMove.draggableId].content : 'Tarefa'}
+      />
+
       <div className="flex justify-between items-end mb-8 px-2">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Fluxo de Produção</h2>
           <p className="text-slate-500 mt-1 font-medium">Visualização geral do chão de fábrica</p>
         </div>
-        <div className="flex gap-3">
-          <div className="flex -space-x-2">
-            {[1,2,3].map(i => (
-              <div key={i} className="w-8 h-8 rounded-full bg-slate-200 border-2 border-white flex items-center justify-center text-xs font-bold text-slate-600">
-                U{i}
-              </div>
-            ))}
-          </div>
-          
-          {/* 4. Botão com ação onClick para abrir o modal */}
-          <button 
-            onClick={() => setIsModalOpen(true)}
-            className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 flex items-center gap-2"
-          >
-            + Novo Pedido
-          </button>
-        </div>
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 flex items-center gap-2"
+        >
+          + Novo Pedido
+        </button>
       </div>
 
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="flex gap-6 overflow-x-auto pb-6 items-start h-full">
           {data.columnOrder.map((columnId) => {
             const column = data.columns[columnId];
-            const tasks = column.taskIds.map((taskId) => data.tasks[taskId]);
+            if (!column) return null; // Segurança caso a coluna suma
+
+            // SEGURANÇA MÁXIMA AQUI: filter(Boolean) remove qualquer task corrompida ou undefined
+            const tasks = (column.taskIds || []).map((taskId) => data.tasks[taskId]).filter(Boolean);
             const style = getColumnStyle(columnId);
             const Icon = style.icon;
 
             return (
               <div key={column.id} className={`w-80 flex-shrink-0 flex flex-col max-h-full rounded-2xl ${style.bg} border ${style.border}`}>
-                {/* Header da Coluna */}
                 <div className="p-4 pb-2 flex justify-between items-center">
                   <div className="flex items-center gap-2.5">
                     <div className={`p-2 rounded-lg bg-white shadow-sm ${style.color}`}>
@@ -111,15 +188,12 @@ const KanbanBoard = () => {
                   </span>
                 </div>
 
-                {/* Área Droppable */}
                 <Droppable droppableId={column.id}>
                   {(provided, snapshot) => (
                     <div
                       {...provided.droppableProps}
                       ref={provided.innerRef}
-                      className={`flex-1 overflow-y-auto p-3 transition-colors min-h-[150px] ${
-                        snapshot.isDraggingOver ? 'bg-white/40' : ''
-                      }`}
+                      className={`flex-1 overflow-y-auto p-3 transition-colors min-h-[150px] ${snapshot.isDraggingOver ? 'bg-white/40' : ''}`}
                     >
                       {tasks.map((task, index) => (
                         <Draggable key={task.id} draggableId={task.id} index={index}>
@@ -128,45 +202,48 @@ const KanbanBoard = () => {
                               ref={provided.innerRef}
                               {...provided.draggableProps}
                               {...provided.dragHandleProps}
-                              className={`group relative bg-white p-4 mb-3 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-all duration-200 overflow-hidden ${
-                                snapshot.isDragging ? 'shadow-2xl ring-2 ring-slate-400 rotate-2 z-50' : ''
-                              }`}
+                              className={`group relative bg-white p-4 mb-3 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-all duration-200 overflow-hidden ${snapshot.isDragging ? 'shadow-2xl ring-2 ring-slate-400 rotate-2 z-50' : ''}`}
                               style={{ ...provided.draggableProps.style }}
                             >
-                              {/* Indicador Lateral Colorido */}
                               <div className={`absolute left-0 top-0 bottom-0 w-1 ${style.bar}`} />
 
-                              {/* Topo do Card: Prioridade e ID */}
                               <div className="flex justify-between items-start mb-3 pl-2">
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
-                                  task.priority === 'urgent' ? 'bg-red-50 text-red-600' : 
-                                  task.priority === 'high' ? 'bg-orange-50 text-orange-600' : 
-                                  'bg-slate-100 text-slate-500'
-                                }`}>
-                                  {task.priority === 'urgent' ? '🔥 Urgente' : task.priority}
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${task.priority === 'urgent' ? 'bg-red-50 text-red-600' : task.priority === 'high' ? 'bg-orange-50 text-orange-600' : 'bg-slate-100 text-slate-500'}`}>
+                                  {task.priority === 'urgent' ? '🔥 Urgente' : task.priority || 'Normal'}
                                 </span>
-                                <span className="text-xs font-mono text-slate-300">#{task.id}</span>
+                                {/* Segurança: garante que id é string antes de cortar */}
+                                <span className="text-xs font-mono text-slate-300">
+                                  #{String(task.id).slice(-4)}
+                                </span>
                               </div>
 
-                              {/* Conteúdo Principal */}
                               <div className="pl-2 mb-4">
-                                <h4 className="font-bold text-slate-800 text-sm leading-snug mb-1">{task.content}</h4>
-                                <div className="flex items-center gap-1.5 text-slate-500">
-                                  <User size={12} />
-                                  <span className="text-xs font-medium">{task.client}</span>
+                                <h4 className="font-bold text-slate-800 text-sm leading-snug mb-1">{task.content || 'Sem nome'}</h4>
+                                <div className="flex flex-col gap-1 mt-2">
+                                  <div className="flex items-center gap-1.5 text-slate-500">
+                                    <User size={12} />
+                                    <span className="text-xs font-medium">{task.client || 'Sem cliente'}</span>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-1.5 text-blue-600 mt-1 bg-blue-50 w-fit px-2 py-0.5 rounded">
+                                    <Hash size={12} />
+                                    <span className="text-xs font-bold">
+                                      Qtd: {task.qtdAtual !== undefined ? task.qtdAtual : (task.qtdInicial || 0)}
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
 
-                              {/* Footer do Card */}
                               <div className="pl-2 flex items-center justify-between pt-3 border-t border-slate-50">
                                 <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium bg-slate-50 px-2 py-1 rounded">
                                   <Clock size={12} />
-                                  <span>2h 30m</span>
+                                  <span>{getTempoDecorrido(task.createdAt)}</span>
                                 </div>
                                 
-                                {/* Avatar Stack (Simulado) */}
                                 <div className="flex -space-x-1.5">
-                                  <div className="w-6 h-6 rounded-full bg-blue-100 border border-white flex items-center justify-center text-[9px] font-bold text-blue-600">JP</div>
+                                  <div className="w-6 h-6 rounded-full bg-slate-100 border border-white flex items-center justify-center text-[10px] text-slate-400">
+                                    <User size={12}/>
+                                  </div>
                                 </div>
                               </div>
                             </div>

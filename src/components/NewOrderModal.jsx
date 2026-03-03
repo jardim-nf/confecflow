@@ -1,107 +1,263 @@
-import React, { useState } from 'react';
-import { X, Camera, Image as ImageIcon, Save } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import { initialData } from '../data';
+import { Clock, User, Scissors, Shirt, Package, CheckCircle2, Hash } from 'lucide-react';
+import NewOrderModal from '../components/NewOrderModal';
+import LossModal from '../components/LossModal';
 
-const NewOrderModal = ({ isOpen, onClose, onSave }) => {
-  const [photoPreview, setPhotoPreview] = useState(null);
+const KanbanBoard = () => {
+  const [data, setData] = useState(initialData);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   
-  if (!isOpen) return null;
+  // Estados do Modal de Perda
+  const [isLossModalOpen, setIsLossModalOpen] = useState(false);
+  const [pendingMove, setPendingMove] = useState(null);
 
-  // Lógica para ler a foto tirada
-  const handlePhotoChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPhotoPreview(reader.result);
-      };
-      reader.readAsDataURL(file);
+  // NOVO: Estado para forçar a atualização do tempo na tela a cada minuto
+  const [currentTime, setCurrentTime] = useState(Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 60000); // Atualiza a cada 1 minuto
+    return () => clearInterval(interval);
+  }, []);
+
+  // NOVO: Função que calcula quanto tempo passou desde a criação
+  const getTempoDecorrido = (startTime) => {
+    if (!startTime) return "0m"; // Se não tiver hora, mostra 0
+    const diffMs = currentTime - startTime;
+    const diffMinutos = Math.floor(diffMs / (1000 * 60));
+    
+    if (diffMinutos < 60) return `${diffMinutos}m`;
+    
+    const horas = Math.floor(diffMinutos / 60);
+    const minutos = diffMinutos % 60;
+    return `${horas}h ${minutos}m`;
+  };
+
+  const onDragEnd = (result) => {
+    const { destination, source, draggableId } = result;
+    if (!destination) return;
+    
+    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+
+    const start = data.columns[source.droppableId];
+    const finish = data.columns[destination.droppableId];
+
+    if (start === finish) {
+      const newTaskIds = Array.from(start.taskIds);
+      newTaskIds.splice(source.index, 1);
+      newTaskIds.splice(destination.index, 0, draggableId);
+      const newColumn = { ...start, taskIds: newTaskIds };
+      setData({ ...data, columns: { ...data.columns, [newColumn.id]: newColumn } });
+      return;
+    }
+
+    // AQUI É ONDE O MODAL DEVE ABRIR
+    setPendingMove(result);
+    setIsLossModalOpen(true);
+  };
+
+  const handleConfirmMove = (qtdPerda) => {
+    if (!pendingMove) return;
+
+    const { destination, source, draggableId } = pendingMove;
+    const start = data.columns[source.droppableId];
+    const finish = data.columns[destination.droppableId];
+
+    const startTaskIds = Array.from(start.taskIds);
+    startTaskIds.splice(source.index, 1);
+    const newStart = { ...start, taskIds: startTaskIds };
+
+    const finishTaskIds = Array.from(finish.taskIds);
+    finishTaskIds.splice(destination.index, 0, draggableId);
+    const newFinish = { ...finish, taskIds: finishTaskIds };
+
+    const task = data.tasks[draggableId];
+    const qtdAtual = task.qtdAtual !== undefined ? task.qtdAtual : task.qtdInicial;
+    const novaQtdAtual = qtdAtual - qtdPerda;
+
+    const updatedTask = {
+      ...task,
+      qtdAtual: novaQtdAtual,
+      perdas: {
+        ...task.perdas,
+        [start.id]: (task.perdas?.[start.id] || 0) + qtdPerda
+      }
+    };
+
+    setData({
+      ...data,
+      tasks: { ...data.tasks, [draggableId]: updatedTask },
+      columns: { ...data.columns, [newStart.id]: newStart, [newFinish.id]: newFinish },
+    });
+
+    setIsLossModalOpen(false);
+    setPendingMove(null);
+  };
+
+  const handleCancelMove = () => {
+    setIsLossModalOpen(false);
+    setPendingMove(null);
+  };
+
+  const getColumnStyle = (colId) => {
+    switch(colId) {
+      case 'col-1': return { icon: Scissors, color: 'text-pink-500', bg: 'bg-pink-50', border: 'border-pink-200', bar: 'bg-pink-500' };
+      case 'col-2': return { icon: Shirt, color: 'text-indigo-500', bg: 'bg-indigo-50', border: 'border-indigo-200', bar: 'bg-indigo-500' };
+      case 'col-3': return { icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-50', border: 'border-emerald-200', bar: 'bg-emerald-500' };
+      case 'col-4': return { icon: Package, color: 'text-orange-500', bg: 'bg-orange-50', border: 'border-orange-200', bar: 'bg-orange-500' };
+      default: return { icon: User, color: 'text-gray-500', bg: 'bg-gray-50', border: 'border-gray-200', bar: 'bg-gray-500' };
     }
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    // Aqui você pegaria os dados do form
-    alert("Pedido Salvo! (Simulação)");
-    onSave();
-    onClose();
-  };
-
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl animate-in fade-in zoom-in duration-200">
-        
-        {/* Cabeçalho */}
-        <div className="flex justify-between items-center p-6 border-b border-slate-100">
-          <h2 className="text-xl font-bold text-slate-800">Novo Pedido de Produção</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X size={24} />
-          </button>
-        </div>
+    <div className="h-full flex flex-col">
+      {/* Modais */}
+      <NewOrderModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)}
+        onSave={(novoPedido) => {
+            const novasTasks = {
+              ...data.tasks,
+              [novoPedido.id]: {
+                ...novoPedido,
+                qtdAtual: novoPedido.qtdInicial,
+                priority: 'normal', 
+                client: 'Cliente Balcão',
+                createdAt: Date.now() // NOVO: Salvando a hora exata da criação!
+              }
+            };
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          
-          {/* Campo de Foto (Mobile Friendly) */}
-          <div className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center hover:bg-slate-50 transition-colors relative cursor-pointer group">
-            <input 
-              type="file" 
-              accept="image/*" 
-              capture="environment" // Isso força abrir a câmera no celular
-              onChange={handlePhotoChange}
-              className="absolute inset-0 opacity-0 cursor-pointer z-10"
-            />
+            const colunaInicial = data.columns['col-1'];
+            const novosTaskIds = [...colunaInicial.taskIds, novoPedido.id];
             
-            {photoPreview ? (
-              <div className="relative h-48 w-full">
-                <img src={photoPreview} alt="Preview" className="w-full h-full object-cover rounded-lg" />
-                <div className="absolute inset-0 bg-black/40 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                  Trocar Foto
-                </div>
-              </div>
-            ) : (
-              <div className="py-8 text-slate-500">
-                <div className="bg-blue-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3 text-blue-600">
-                  <Camera size={32} />
-                </div>
-                <p className="font-medium">Toque para tirar foto</p>
-                <p className="text-xs text-slate-400 mt-1">Ou escolha da galeria</p>
-              </div>
-            )}
-          </div>
+            const novaColuna = { ...colunaInicial, taskIds: novosTaskIds };
 
-          <div className="grid grid-cols-2 gap-4">
+            setData({
+              ...data,
+              tasks: novasTasks,
+              columns: { ...data.columns, 'col-1': novaColuna }
+            });
+        }}
+      />
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Qtd. Peças</label>
-              <input type="number" className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="0" />
-            </div>
-          </div>
+      <LossModal 
+        isOpen={isLossModalOpen}
+        onClose={handleCancelMove}
+        onConfirm={handleConfirmMove}
+        taskName={pendingMove ? data.tasks[pendingMove.draggableId].content : ''}
+      />
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Descrição / Modelo</label>
-            <textarea className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none" rows="2" placeholder="Ex: Camiseta Gola V..."></textarea>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Prioridade</label>
-            <div className="flex gap-2">
-              {['Normal', 'Alta', 'Urgente'].map((p) => (
-                <label key={p} className="flex-1 cursor-pointer">
-                  <input type="radio" name="prioridade" className="peer sr-only" />
-                  <div className="text-center py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 peer-checked:bg-blue-600 peer-checked:text-white peer-checked:border-blue-600 transition-all">
-                    {p}
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <button type="submit" className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-transform active:scale-95">
-            <Save size={20} /> Salvar Pedido
-          </button>
-        </form>
+      {/* Header */}
+      <div className="flex justify-between items-end mb-8 px-2">
+        <div>
+          <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Fluxo de Produção</h2>
+          <p className="text-slate-500 mt-1 font-medium">Visualização geral do chão de fábrica</p>
+        </div>
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 flex items-center gap-2"
+        >
+          + Novo Pedido
+        </button>
       </div>
+
+      <DragDropContext onDragEnd={onDragEnd}>
+        <div className="flex gap-6 overflow-x-auto pb-6 items-start h-full">
+          {data.columnOrder.map((columnId) => {
+            const column = data.columns[columnId];
+            const tasks = column.taskIds.map((taskId) => data.tasks[taskId]);
+            const style = getColumnStyle(columnId);
+            const Icon = style.icon;
+
+            return (
+              <div key={column.id} className={`w-80 flex-shrink-0 flex flex-col max-h-full rounded-2xl ${style.bg} border ${style.border}`}>
+                <div className="p-4 pb-2 flex justify-between items-center">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`p-2 rounded-lg bg-white shadow-sm ${style.color}`}>
+                      <Icon size={18} strokeWidth={2.5} />
+                    </div>
+                    <h3 className="font-bold text-slate-700">{column.title}</h3>
+                  </div>
+                  <span className="bg-white/60 text-slate-600 text-xs font-bold px-2 py-1 rounded-md border border-black/5">
+                    {tasks.length}
+                  </span>
+                </div>
+
+                <Droppable droppableId={column.id}>
+                  {(provided, snapshot) => (
+                    <div
+                      {...provided.droppableProps}
+                      ref={provided.innerRef}
+                      className={`flex-1 overflow-y-auto p-3 transition-colors min-h-[150px] ${snapshot.isDraggingOver ? 'bg-white/40' : ''}`}
+                    >
+                      {tasks.map((task, index) => (
+                        <Draggable key={task.id} draggableId={task.id} index={index}>
+                          {(provided, snapshot) => (
+                            <div
+                              ref={provided.innerRef}
+                              {...provided.draggableProps}
+                              {...provided.dragHandleProps}
+                              className={`group relative bg-white p-4 mb-3 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-all duration-200 overflow-hidden ${snapshot.isDragging ? 'shadow-2xl ring-2 ring-slate-400 rotate-2 z-50' : ''}`}
+                              style={{ ...provided.draggableProps.style }}
+                            >
+                              <div className={`absolute left-0 top-0 bottom-0 w-1 ${style.bar}`} />
+
+                              <div className="flex justify-between items-start mb-3 pl-2">
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${task.priority === 'urgent' ? 'bg-red-50 text-red-600' : task.priority === 'high' ? 'bg-orange-50 text-orange-600' : 'bg-slate-100 text-slate-500'}`}>
+                                  {task.priority === 'urgent' ? '🔥 Urgente' : task.priority || 'Normal'}
+                                </span>
+                                <span className="text-xs font-mono text-slate-300">#{task.id.slice(-4)}</span>
+                              </div>
+
+                              <div className="pl-2 mb-4">
+                                <h4 className="font-bold text-slate-800 text-sm leading-snug mb-1">{task.content}</h4>
+                                <div className="flex flex-col gap-1 mt-2">
+                                  <div className="flex items-center gap-1.5 text-slate-500">
+                                    <User size={12} />
+                                    <span className="text-xs font-medium">{task.client}</span>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-1.5 text-blue-600 mt-1 bg-blue-50 w-fit px-2 py-0.5 rounded">
+                                    <Hash size={12} />
+                                    <span className="text-xs font-bold">
+                                      Qtd: {task.qtdAtual !== undefined ? task.qtdAtual : task.qtdInicial}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="pl-2 flex items-center justify-between pt-3 border-t border-slate-50">
+                                <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium bg-slate-50 px-2 py-1 rounded">
+                                  <Clock size={12} />
+                                  {/* AQUI ESTÁ O TEMPO REAL CALCULADO! */}
+                                  <span>{getTempoDecorrido(task.createdAt)}</span>
+                                </div>
+                                
+                                {/* Removi o JP falso e deixei genérico, ou vazio se não tiver funcionário */}
+                                <div className="flex -space-x-1.5">
+                                  <div className="w-6 h-6 rounded-full bg-slate-100 border border-white flex items-center justify-center text-[10px] text-slate-400">
+                                    <User size={12}/>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </Draggable>
+                      ))}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </div>
+            );
+          })}
+        </div>
+      </DragDropContext>
     </div>
   );
 };
 
-export default NewOrderModal;
+export default KanbanBoard;
