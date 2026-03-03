@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
+// src/App.jsx
+import React from 'react';
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Scissors, Settings, LogOut, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Scissors, Settings, LogOut, BarChart3, Clock } from 'lucide-react';
 
-// Importação das páginas e dados iniciais
+// Importação das páginas
 import KanbanBoard from './pages/KanbanBoard';
 import Reports from './pages/Reports';
-import { initialData } from './data'; 
+import OrderTracker from './pages/OrderTracker';
 
-// Componente de Link Ativo do Menu Lateral
+// A IMPORTAÇÃO QUE ESTAVA FALTANDO 👇
+import { ProducaoProvider } from './context/ProducaoContext'; 
+
 const NavLink = ({ to, icon: Icon, children }) => {
   const location = useLocation();
   const isActive = location.pathname === to;
@@ -27,7 +30,6 @@ const NavLink = ({ to, icon: Icon, children }) => {
   );
 };
 
-// Layout Principal (Menu Lateral fixo e conteúdo do lado)
 const Layout = ({ children }) => {
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -47,8 +49,9 @@ const Layout = ({ children }) => {
           <NavLink to="/" icon={LayoutDashboard}>Quadro Kanban</NavLink>
           
           <p className="px-4 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 mt-8">Gerenciamento</p>
+          <NavLink to="/tracker" icon={Clock}>Rastreio</NavLink> 
           <NavLink to="/reports" icon={BarChart3}>Relatórios</NavLink>
-          <button className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:bg-slate-800 hover:text-white rounded-xl transition-all">
+          <button className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:bg-slate-800 hover:text-white rounded-xl transition-all mt-8">
             <Settings size={20} /> Configurações
           </button>
         </nav>
@@ -70,23 +73,23 @@ const Layout = ({ children }) => {
 };
 
 function App() {
-  const [data, setData] = useState(initialData);
-
   return (
-    <BrowserRouter>
-      <Layout>
-        <Routes>
-          <Route 
-            path="/" 
-            element={<KanbanBoard data={data} setData={setData} />} 
-          />
-          <Route 
-            path="/reports" 
-            element={<Reports data={data} />} 
-          />
-        </Routes>
-      </Layout>
-    </BrowserRouter>
+    <ProducaoProvider>
+      <BrowserRouter 
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
+        <Layout>
+          <Routes>
+            <Route path="/" element={<KanbanBoard />} />
+            <Route path="/tracker" element={<OrderTracker />} />
+            <Route path="/reports" element={<Reports />} />
+          </Routes>
+        </Layout>
+      </BrowserRouter>
+    </ProducaoProvider>
   );
 }
 
