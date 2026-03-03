@@ -1,255 +1,218 @@
 import React, { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { initialData } from '../data';
-import { Clock, User, Scissors, Shirt, Package, CheckCircle2, Hash } from 'lucide-react';
+import { Clock, User, Scissors, Shirt, Package, CheckCircle2, Hash, AlertCircle, DollarSign, History } from 'lucide-react';
 import NewOrderModal from '../components/NewOrderModal';
 import LossModal from '../components/LossModal';
 
-const KanbanBoard = () => {
-  const [data, setData] = useState(initialData);
+const KanbanBoard = ({ data, setData }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLossModalOpen, setIsLossModalOpen] = useState(false);
   const [pendingMove, setPendingMove] = useState(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentTime(Date.now());
-    }, 60000);
+    const interval = setInterval(() => setCurrentTime(Date.now()), 60000);
     return () => clearInterval(interval);
   }, []);
 
-  const getTempoDecorrido = (startTime) => {
-    if (!startTime) return "0m";
-    const diffMs = currentTime - startTime;
-    const diffMinutos = Math.max(0, Math.floor(diffMs / (1000 * 60))); // Garante que não fique negativo
-    
-    if (diffMinutos < 60) return `${diffMinutos}m`;
-    
-    const horas = Math.floor(diffMinutos / 60);
-    const minutos = diffMinutos % 60;
-    return `${horas}h ${minutos}m`;
+  // --- FUNÇÃO DE RELATÓRIO INTEGRADA ---
+  const formatarRelatorioTempos = (timeLogs) => {
+    return Object.entries(timeLogs || {}).map(([colId, log]) => {
+      // Se a etapa ainda não terminou (exitTime é null), calcula o tempo até o agora
+      const totalMs = log.duration || (currentTime - log.entryTime);
+      const min = Math.floor(totalMs / 60000);
+      const horas = Math.floor(min / 60);
+      
+      return {
+        etapa: data.columns[colId]?.title || 'Etapa',
+        tempo: horas > 0 ? `${horas}h ${min % 60}m` : `${min}m`,
+        isAtual: !log.exitTime
+      };
+    });
+  };
+
+  const formatCurrency = (value) => {
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value || 0);
   };
 
   const onDragEnd = (result) => {
-    const { destination, source, draggableId } = result;
-    if (!destination) return;
-    
-    if (destination.droppableId === source.droppableId && destination.index === source.index) return;
-
-    const start = data.columns[source.droppableId];
-    const finish = data.columns[destination.droppableId];
-
-    if (start === finish) {
-      const newTaskIds = Array.from(start.taskIds);
-      newTaskIds.splice(source.index, 1);
-      newTaskIds.splice(destination.index, 0, draggableId);
-      const newColumn = { ...start, taskIds: newTaskIds };
-      setData({ ...data, columns: { ...data.columns, [newColumn.id]: newColumn } });
-      return;
-    }
-
+    const { destination, source } = result;
+    if (!destination || (destination.droppableId === source.droppableId && destination.index === source.index)) return;
     setPendingMove(result);
     setIsLossModalOpen(true);
   };
 
   const handleConfirmMove = (qtdPerda) => {
     if (!pendingMove) return;
-
     const { destination, source, draggableId } = pendingMove;
-    const start = data.columns[source.droppableId];
-    const finish = data.columns[destination.droppableId];
-
-    const startTaskIds = Array.from(start.taskIds);
-    startTaskIds.splice(source.index, 1);
-    const newStart = { ...start, taskIds: startTaskIds };
-
-    const finishTaskIds = Array.from(finish.taskIds);
-    finishTaskIds.splice(destination.index, 0, draggableId);
-    const newFinish = { ...finish, taskIds: finishTaskIds };
+    const now = Date.now();
 
     const task = data.tasks[draggableId];
-    if (!task) return; // Trava de segurança
+    const startColId = source.droppableId;
+    const endColId = destination.droppableId;
 
-    const qtdAtual = task.qtdAtual !== undefined ? task.qtdAtual : task.qtdInicial;
-    const novaQtdAtual = Math.max(0, qtdAtual - qtdPerda); // Garante que a quantidade não fique negativa
+    const entryTime = task.timeLogs?.[startColId]?.entryTime || task.createdAt;
+    const duration = now - entryTime;
+
+    const updatedTimeLogs = {
+      ...task.timeLogs,
+      [startColId]: {
+        ...task.timeLogs?.[startColId],
+        entryTime: entryTime,
+        exitTime: now,
+        duration: duration
+      },
+      [endColId]: {
+        entryTime: now,
+        exitTime: null
+      }
+    };
 
     const updatedTask = {
       ...task,
-      qtdAtual: novaQtdAtual,
-      perdas: {
-        ...task.perdas,
-        [start.id]: (task.perdas?.[start.id] || 0) + qtdPerda
+      qtdAtual: Math.max(0, (task.qtdAtual || task.qtdInicial) - qtdPerda),
+      timeLogs: updatedTimeLogs,
+      perdas: { 
+        ...task.perdas, 
+        [startColId]: (task.perdas?.[startColId] || 0) + qtdPerda 
       }
     };
 
     setData({
       ...data,
       tasks: { ...data.tasks, [draggableId]: updatedTask },
-      columns: { ...data.columns, [newStart.id]: newStart, [newFinish.id]: newFinish },
+      columns: {
+        ...data.columns,
+        [startColId]: { 
+          ...data.columns[startColId], 
+          taskIds: data.columns[startColId].taskIds.filter(id => id !== draggableId) 
+        },
+        [endColId]: { 
+          ...data.columns[endColId], 
+          taskIds: [...data.columns[endColId].taskIds, draggableId] 
+        }
+      }
     });
 
     setIsLossModalOpen(false);
     setPendingMove(null);
   };
 
-  const handleCancelMove = () => {
-    setIsLossModalOpen(false);
-    setPendingMove(null);
-  };
-
   const getColumnStyle = (colId) => {
-    switch(colId) {
-      case 'col-1': return { icon: Scissors, color: 'text-pink-500', bg: 'bg-pink-50', border: 'border-pink-200', bar: 'bg-pink-500' };
-      case 'col-2': return { icon: Shirt, color: 'text-indigo-500', bg: 'bg-indigo-50', border: 'border-indigo-200', bar: 'bg-indigo-500' };
-      case 'col-3': return { icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-50', border: 'border-emerald-200', bar: 'bg-emerald-500' };
-      case 'col-4': return { icon: Package, color: 'text-orange-500', bg: 'bg-orange-50', border: 'border-orange-200', bar: 'bg-orange-500' };
-      default: return { icon: User, color: 'text-gray-500', bg: 'bg-gray-50', border: 'border-gray-200', bar: 'bg-gray-500' };
-    }
+    const styles = {
+      'col-1': { icon: Scissors, color: 'text-pink-500', bg: 'bg-pink-50', bar: 'bg-pink-500' },
+      'col-2': { icon: Shirt, color: 'text-indigo-500', bg: 'bg-indigo-50', bar: 'bg-indigo-500' },
+      'col-3': { icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-50', bar: 'bg-emerald-500' },
+      'col-4': { icon: Package, color: 'text-orange-500', bg: 'bg-orange-50', bar: 'bg-orange-500' }
+    };
+    return styles[colId] || { icon: User, color: 'text-gray-500', bg: 'bg-gray-50', bar: 'bg-gray-500' };
   };
 
   return (
     <div className="h-full flex flex-col">
-      <NewOrderModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)}
-        onSave={(novoPedido) => {
-            if (!novoPedido || !novoPedido.id) return; // Segurança caso o modal envie algo vazio
+      <NewOrderModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSave={(order) => {
+        const firstCol = data.columns['col-1'];
+        setData({
+          ...data,
+          tasks: { ...data.tasks, [order.id]: { ...order, timeLogs: { 'col-1': { entryTime: Date.now() } } } },
+          columns: { ...data.columns, 'col-1': { ...firstCol, taskIds: [...firstCol.taskIds, order.id] } }
+        });
+      }} />
 
-            const novasTasks = {
-              ...data.tasks,
-              [novoPedido.id]: {
-                ...novoPedido,
-                qtdAtual: novoPedido.qtdInicial || 0,
-                priority: 'normal', 
-                client: 'Cliente Balcão',
-                createdAt: Date.now()
-              }
-            };
-
-            const colunaInicial = data.columns['col-1'];
-            // Segurança: Garante que taskIds existe e é um array
-            const taskIdsSeguros = colunaInicial?.taskIds || [];
-            const novosTaskIds = [...taskIdsSeguros, novoPedido.id];
-            
-            const novaColuna = { ...colunaInicial, taskIds: novosTaskIds };
-
-            setData({
-              ...data,
-              tasks: novasTasks,
-              columns: { ...data.columns, 'col-1': novaColuna }
-            });
-        }}
-      />
-
-      {/* Trava de segurança no envio do taskName para evitar undefined */}
       <LossModal 
-        isOpen={isLossModalOpen}
-        onClose={handleCancelMove}
+        isOpen={isLossModalOpen} 
+        onClose={() => { setIsLossModalOpen(false); setPendingMove(null); }} 
         onConfirm={handleConfirmMove}
-        taskName={pendingMove && data.tasks[pendingMove.draggableId] ? data.tasks[pendingMove.draggableId].content : 'Tarefa'}
+        taskName={pendingMove ? data.tasks[pendingMove.draggableId]?.content : ''}
       />
 
       <div className="flex justify-between items-end mb-8 px-2">
         <div>
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Fluxo de Produção</h2>
-          <p className="text-slate-500 mt-1 font-medium">Visualização geral do chão de fábrica</p>
+          <p className="text-slate-500 mt-1 font-medium">Controle financeiro e histórico de tempo</p>
         </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-semibold transition-all shadow-lg hover:shadow-xl active:scale-95 flex items-center gap-2"
-        >
-          + Novo Pedido
-        </button>
+        <button onClick={() => setIsModalOpen(true)} className="bg-slate-900 text-white px-5 py-2.5 rounded-xl font-semibold shadow-lg hover:bg-slate-800 transition-all">+ Novo Pedido</button>
       </div>
 
       <DragDropContext onDragEnd={onDragEnd}>
         <div className="flex gap-6 overflow-x-auto pb-6 items-start h-full">
           {data.columnOrder.map((columnId) => {
             const column = data.columns[columnId];
-            if (!column) return null; // Segurança caso a coluna suma
-
-            // SEGURANÇA MÁXIMA AQUI: filter(Boolean) remove qualquer task corrompida ou undefined
-            const tasks = (column.taskIds || []).map((taskId) => data.tasks[taskId]).filter(Boolean);
+            const tasks = column.taskIds.map(id => data.tasks[id]).filter(Boolean);
             const style = getColumnStyle(columnId);
-            const Icon = style.icon;
 
             return (
-              <div key={column.id} className={`w-80 flex-shrink-0 flex flex-col max-h-full rounded-2xl ${style.bg} border ${style.border}`}>
-                <div className="p-4 pb-2 flex justify-between items-center">
-                  <div className="flex items-center gap-2.5">
-                    <div className={`p-2 rounded-lg bg-white shadow-sm ${style.color}`}>
-                      <Icon size={18} strokeWidth={2.5} />
-                    </div>
+              <div key={column.id} className={`w-80 flex-shrink-0 flex flex-col max-h-full rounded-2xl ${style.bg} border border-slate-200 shadow-sm`}>
+                <div className="p-4 flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <style.icon size={18} className={style.color} />
                     <h3 className="font-bold text-slate-700">{column.title}</h3>
                   </div>
-                  <span className="bg-white/60 text-slate-600 text-xs font-bold px-2 py-1 rounded-md border border-black/5">
-                    {tasks.length}
-                  </span>
+                  <span className="text-xs font-bold bg-white px-2 py-1 rounded shadow-sm border border-slate-100">{tasks.length}</span>
                 </div>
 
                 <Droppable droppableId={column.id}>
-                  {(provided, snapshot) => (
-                    <div
-                      {...provided.droppableProps}
-                      ref={provided.innerRef}
-                      className={`flex-1 overflow-y-auto p-3 transition-colors min-h-[150px] ${snapshot.isDraggingOver ? 'bg-white/40' : ''}`}
-                    >
-                      {tasks.map((task, index) => (
-                        <Draggable key={task.id} draggableId={task.id} index={index}>
-                          {(provided, snapshot) => (
-                            <div
-                              ref={provided.innerRef}
-                              {...provided.draggableProps}
-                              {...provided.dragHandleProps}
-                              className={`group relative bg-white p-4 mb-3 rounded-xl shadow-sm border border-slate-100 hover:shadow-md transition-all duration-200 overflow-hidden ${snapshot.isDragging ? 'shadow-2xl ring-2 ring-slate-400 rotate-2 z-50' : ''}`}
-                              style={{ ...provided.draggableProps.style }}
-                            >
-                              <div className={`absolute left-0 top-0 bottom-0 w-1 ${style.bar}`} />
+                  {(provided) => (
+                    <div {...provided.droppableProps} ref={provided.innerRef} className="flex-1 overflow-y-auto p-3 min-h-[200px]">
+                      {tasks.map((task, index) => {
+                        const valorTotal = (task.qtdAtual || 0) * (task.valorUnitario || 0);
+                        const valorPerdido = (task.qtdInicial - task.qtdAtual) * (task.valorUnitario || 0);
+                        const historico = formatarRelatorioTempos(task.timeLogs);
 
-                              <div className="flex justify-between items-start mb-3 pl-2">
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${task.priority === 'urgent' ? 'bg-red-50 text-red-600' : task.priority === 'high' ? 'bg-orange-50 text-orange-600' : 'bg-slate-100 text-slate-500'}`}>
-                                  {task.priority === 'urgent' ? '🔥 Urgente' : task.priority || 'Normal'}
-                                </span>
-                                {/* Segurança: garante que id é string antes de cortar */}
-                                <span className="text-xs font-mono text-slate-300">
-                                  #{String(task.id).slice(-4)}
-                                </span>
-                              </div>
-
-                              <div className="pl-2 mb-4">
-                                <h4 className="font-bold text-slate-800 text-sm leading-snug mb-1">{task.content || 'Sem nome'}</h4>
-                                <div className="flex flex-col gap-1 mt-2">
-                                  <div className="flex items-center gap-1.5 text-slate-500">
-                                    <User size={12} />
-                                    <span className="text-xs font-medium">{task.client || 'Sem cliente'}</span>
-                                  </div>
-                                  
-                                  <div className="flex items-center gap-1.5 text-blue-600 mt-1 bg-blue-50 w-fit px-2 py-0.5 rounded">
-                                    <Hash size={12} />
-                                    <span className="text-xs font-bold">
-                                      Qtd: {task.qtdAtual !== undefined ? task.qtdAtual : (task.qtdInicial || 0)}
-                                    </span>
+                        return (
+                          <Draggable key={task.id} draggableId={task.id} index={index}>
+                            {(provided) => (
+                              <div ref={provided.innerRef} {...provided.draggableProps} {...provided.dragHandleProps} className="bg-white p-4 mb-4 rounded-xl shadow-sm border-l-4 relative" style={{ borderLeftColor: style.bar.replace('bg-', ''), ...provided.draggableProps.style }}>
+                                
+                                <div className="flex justify-between items-start mb-3">
+                                  <span className="text-[10px] font-bold uppercase text-slate-400">#{task.id.slice(-4)}</span>
+                                  <div className="flex flex-col items-end gap-1">
+                                    <div className="flex items-center gap-1 text-blue-600 font-bold text-[10px] bg-blue-50 px-2 py-0.5 rounded">
+                                       <Hash size={10} /> {task.qtdAtual} / {task.qtdInicial} un
+                                    </div>
+                                    <div className="flex items-center gap-1 text-emerald-600 font-bold text-[10px] bg-emerald-50 px-2 py-0.5 rounded">
+                                       <DollarSign size={10} /> {formatCurrency(valorTotal)}
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
 
-                              <div className="pl-2 flex items-center justify-between pt-3 border-t border-slate-50">
-                                <div className="flex items-center gap-1.5 text-xs text-slate-400 font-medium bg-slate-50 px-2 py-1 rounded">
-                                  <Clock size={12} />
-                                  <span>{getTempoDecorrido(task.createdAt)}</span>
+                                <h4 className="font-bold text-slate-800 text-sm leading-tight mb-1">{task.content}</h4>
+                                <p className="text-[11px] text-slate-500 flex items-center gap-1 mb-3"><User size={12}/> {task.client}</p>
+
+                                {/* --- NOVA SEÇÃO: HISTÓRICO DE TEMPOS --- */}
+                                <div className="bg-slate-50/50 rounded-lg p-2 mb-3 border border-slate-100">
+                                  <p className="text-[9px] font-bold text-slate-400 uppercase flex items-center gap-1 mb-1.5">
+                                    <History size={10} /> Tempo por Etapa
+                                  </p>
+                                  <div className="space-y-1">
+                                    {historico.map((h, i) => (
+                                      <div key={i} className={`flex justify-between items-center text-[10px] ${h.isAtual ? 'text-blue-600 font-bold' : 'text-slate-500'}`}>
+                                        <span className="flex items-center gap-1">
+                                          <div className={`w-1 h-1 rounded-full ${h.isAtual ? 'bg-blue-500 animate-pulse' : 'bg-slate-300'}`} />
+                                          {h.etapa}
+                                        </span>
+                                        <span className="font-mono">{h.tempo}</span>
+                                      </div>
+                                    ))}
+                                  </div>
                                 </div>
                                 
-                                <div className="flex -space-x-1.5">
-                                  <div className="w-6 h-6 rounded-full bg-slate-100 border border-white flex items-center justify-center text-[10px] text-slate-400">
-                                    <User size={12}/>
-                                  </div>
+                                <div className="pt-2 border-t border-slate-100 flex justify-between items-center">
+                                  <span className="text-[10px] font-medium text-slate-400">Tempo total em produção</span>
+                                  {task.qtdAtual < task.qtdInicial && (
+                                    <div className="text-[10px] font-bold text-red-500 text-right leading-tight">
+                                      <div className="flex items-center justify-end gap-1">
+                                        <AlertCircle size={10} /> -{task.qtdInicial - task.qtdAtual} peças
+                                      </div>
+                                      <span>({formatCurrency(valorPerdido)})</span>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
-                            </div>
-                          )}
-                        </Draggable>
-                      ))}
+                            )}
+                          </Draggable>
+                        );
+                      })}
                       {provided.placeholder}
                     </div>
                   )}

@@ -48,8 +48,7 @@ const TimerControl = ({ taskId }) => {
 
 const OrderTracker = () => {
   // Transforma o objeto de tasks em array para listar
-  const tasksList = Object.values(initialData.tasks);
-
+const tasksList = Object.values(data.tasks); // Usa os dados do estado global
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex justify-between items-center mb-8">

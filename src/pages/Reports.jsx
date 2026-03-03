@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { BarChart3, TrendingUp, AlertTriangle, CheckCircle, Download, Loader2 } from 'lucide-react';
+import { BarChart3, TrendingUp, AlertTriangle, CheckCircle, Download, Loader2, DollarSign, Package } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
@@ -17,144 +17,128 @@ const KPICard = ({ title, value, subtitle, icon: Icon, color }) => (
   </div>
 );
 
-const Reports = () => {
-  const reportRef = useRef(); // Referência para capturar o elemento
+const Reports = ({ data }) => {
+  const reportRef = useRef();
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // --- CÁLCULOS DOS INDICADORES REAIS ---
+  const tasksArray = Object.values(data.tasks || {});
+  
+  const faturamentoTotal = tasksArray.reduce((acc, t) => acc + ((t.qtdAtual || 0) * (t.valorUnitario || 0)), 0);
+  const totalPecasProduzidas = tasksArray.reduce((acc, t) => acc + (t.qtdAtual || 0), 0);
+  const totalPerdaFinanceira = tasksArray.reduce((acc, t) => acc + (((t.qtdInicial || 0) - (t.qtdAtual || 0)) * (t.valorUnitario || 0)), 0);
+  
+  // Eficiência Global: (Qtd Atual / Qtd Inicial) * 100
+  const qtdInicialTotal = tasksArray.reduce((acc, t) => acc + (t.qtdInicial || 0), 0);
+  const eficienciaGlobal = qtdInicialTotal > 0 ? Math.round((totalPecasProduzidas / qtdInicialTotal) * 100) : 0;
+
+  const formatCurrency = (val) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 
   const downloadPDF = async () => {
     setIsGenerating(true);
     const element = reportRef.current;
-    
     try {
-      // 1. Captura o elemento como Canvas (Print)
-      const canvas = await html2canvas(element, {
-        scale: 2, // Melhora a resolução
-        useCORS: true, // Permite carregar imagens externas se tiver
-      });
-
-      // 2. Configurações do PDF
+      const canvas = await html2canvas(element, { scale: 2 });
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
-      
-      // Ajusta o tamanho da imagem para caber no A4
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      
-      // 3. Baixa o arquivo
-      pdf.save('Relatorio-Producao-ConfecFlow.pdf');
+      pdf.save(`Relatorio-Producao-${new Date().toLocaleDateString()}.pdf`);
     } catch (error) {
       console.error("Erro ao gerar PDF:", error);
-      alert("Erro ao gerar PDF");
     } finally {
       setIsGenerating(false);
     }
   };
 
   return (
-    <div className="p-2 md:p-0 animate-in fade-in duration-500">
+    <div className="animate-in fade-in duration-500">
       
-      {/* Cabeçalho com Botão de Download (Fica FORA do PDF) */}
+      {/* Cabeçalho de Controle */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
-          <h2 className="text-3xl font-extrabold text-slate-900">Relatórios de Desempenho</h2>
-          <p className="text-slate-500">Análise semanal da produção</p>
+          <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">Relatórios de Desempenho</h2>
+          <p className="text-slate-500">Análise financeira e produtiva do Brocou System</p>
         </div>
         
         <button 
           onClick={downloadPDF}
           disabled={isGenerating}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-blue-200 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
+          className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg transition-all active:scale-95 disabled:opacity-70"
         >
           {isGenerating ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />}
-          {isGenerating ? "Gerando PDF..." : "Baixar PDF"}
+          {isGenerating ? "Processando..." : "Exportar PDF"}
         </button>
       </div>
 
-      {/* Área que será impressa no PDF (Ref) */}
-      <div ref={reportRef} className="bg-slate-50 p-4 rounded-xl">
+      <div ref={reportRef} className="space-y-8 p-4 bg-slate-50 rounded-2xl">
         
-        {/* Cabeçalho interno para sair no PDF */}
-        <div className="mb-6 pb-4 border-b border-slate-200 md:hidden">
-            <h1 className="text-xl font-bold text-slate-700">Relatório ConfecFlow</h1>
-            <p className="text-xs text-slate-500">Gerado em: {new Date().toLocaleDateString()}</p>
-        </div>
-
-        {/* KPIs (Indicadores) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        {/* KPIs Dinâmicos */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <KPICard 
-            title="Peças Produzidas" 
-            value="1.240" 
-            subtitle="+12% essa semana" 
-            icon={CheckCircle} 
+            title="Produção Total" 
+            value={formatCurrency(faturamentoTotal)} 
+            subtitle="Valor em mercadoria" 
+            icon={DollarSign} 
             color={{ bg: 'bg-emerald-50', icon: 'text-emerald-600', text: 'text-emerald-600' }} 
           />
           <KPICard 
-            title="Eficiência Média" 
-            value="85%" 
-            subtitle="Dentro da meta" 
-            icon={TrendingUp} 
+            title="Peças Produzidas" 
+            value={totalPecasProduzidas.toLocaleString()} 
+            subtitle={`${tasksArray.length} pedidos ativos`} 
+            icon={Package} 
             color={{ bg: 'bg-blue-50', icon: 'text-blue-600', text: 'text-blue-600' }} 
           />
           <KPICard 
-            title="Gargalos (Atrasos)" 
-            value="3" 
-            subtitle="Setor: Costura" 
+            title="Prejuízo por Perdas" 
+            value={formatCurrency(totalPerdaFinanceira)} 
+            subtitle="Corte e Costura" 
             icon={AlertTriangle} 
             color={{ bg: 'bg-red-50', icon: 'text-red-600', text: 'text-red-600' }} 
           />
           <KPICard 
-            title="Volume Atual" 
-            value="R$ 45k" 
-            subtitle="Em produção" 
-            icon={BarChart3} 
+            title="Eficiência Média" 
+            value={`${eficienciaGlobal}%`} 
+            subtitle="Aproveitamento de matéria" 
+            icon={TrendingUp} 
             color={{ bg: 'bg-purple-50', icon: 'text-purple-600', text: 'text-purple-600' }} 
           />
         </div>
 
-        {/* Gráfico Simulado (Visual Clean) */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Gráfico de Barras CSS */}
-          <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-            <h3 className="font-bold text-slate-800 mb-6">Produção por Dia (Peças)</h3>
-            <div className="flex items-end gap-4 h-64 w-full px-2">
-              {[45, 60, 35, 70, 80, 50, 65].map((h, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center gap-2 group cursor-pointer">
-                  <div className="relative w-full bg-blue-100 rounded-t-lg transition-all duration-300 group-hover:bg-blue-500 overflow-hidden" style={{ height: `${h}%` }}>
-                    {/* Barra */}
-                  </div>
-                  <span className="text-xs text-slate-400 font-medium">
-                    {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'][i]}
-                  </span>
-                </div>
-              ))}
-            </div>
+        {/* Tabela Detalhada de Pedidos */}
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-slate-50">
+            <h3 className="font-bold text-slate-800">Detalhamento por Pedido</h3>
           </div>
-
-          {/* Lista de Melhores Clientes */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-            <h3 className="font-bold text-slate-800 mb-4">Top Clientes</h3>
-            <div className="space-y-4">
-              {[
-                { nome: 'Teste Modas', pecas: 450, valor: 'R$ 12k' },
-                { nome: 'Lava Jato', pecas: 320, valor: 'R$ 8k' },
-                { nome: 'Colégio X', pecas: 150, valor: 'R$ 5k' },
-              ].map((cliente, i) => (
-                <div key={i} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-lg transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold text-xs text-slate-600">
-                      {i + 1}
-                    </div>
-                    <div>
-                      <p className="font-medium text-sm text-slate-700">{cliente.nome}</p>
-                      <p className="text-xs text-slate-400">{cliente.pecas} peças</p>
-                    </div>
-                  </div>
-                  <span className="text-sm font-bold text-slate-600">{cliente.valor}</span>
-                </div>
-              ))}
-            </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="bg-slate-50 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                <tr>
+                  <th className="px-6 py-4">Produto</th>
+                  <th className="px-6 py-4">Cliente</th>
+                  <th className="px-6 py-4">Qtd Final</th>
+                  <th className="px-6 py-4">Valor Produzido</th>
+                  <th className="px-6 py-4">Perda Financeira</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {tasksArray.map((task) => {
+                  const valorProduzido = (task.qtdAtual || 0) * (task.valorUnitario || 0);
+                  const perdaFin = ((task.qtdInicial || 0) - (task.qtdAtual || 0)) * (task.valorUnitario || 0);
+                  
+                  return (
+                    <tr key={task.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-6 py-4 font-bold text-slate-700 text-sm">{task.content}</td>
+                      <td className="px-6 py-4 text-sm text-slate-500">{task.client}</td>
+                      <td className="px-6 py-4 text-sm font-mono">{task.qtdAtual} un</td>
+                      <td className="px-6 py-4 text-sm font-bold text-emerald-600">{formatCurrency(valorProduzido)}</td>
+                      <td className="px-6 py-4 text-sm font-bold text-red-500">{formatCurrency(perdaFin)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
